@@ -6,24 +6,39 @@ import (
 	"sync"
 )
 
-type HandlerRouter func (http.ResponseWriter, *http.Request, Params)
+// 框架信息
+const (
+	Version       = "0.0.1"
+	FrameworkName = "koala"
+	Anthor        = "xiaoliang"
+)
+
+//type HandlerRouter func (http.ResponseWriter, *http.Request, Params)
+type HandlerRouter func (*Context)
 
 // 声明 koala 引擎结构
 type Engine struct {
-	trees map[string]*node
-	pool sync.Pool
+	version string
+	trees   map[string]*node
+	pool    sync.Pool
 }
 
 func New() *Engine {
 
 	engine := &Engine{
+		version:Version,
+	}
+
+	engine.pool.New = func() interface{} {
+		return engine.allocateContext()
 	}
 
 	return engine
 }
 
-func (e *Engine) Test() string {
-	return "123"
+// 建立上下文数据
+func (e *Engine) allocateContext() *Context {
+	return &Context{engine:e}
 }
 
 // 监听端口
@@ -34,29 +49,35 @@ func (e *Engine) RUN(addr string) {
 
 // http中间件实现
 func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request ) {
-	//fmt.Printf("%v == %v", w, req)
+	// 获取路径
 	path := req.URL.Path
 
 	if root := e.trees[req.Method]; root != nil {
 
+		// 在树上找到对应请求方法，然后执行
 		if handler, ps, _ := root.getValue(path); handler != nil {
-			//fmt.Printf("getValue %+v \n", tsr)
-			handler(w, req, ps)
+
+			// 获取临时对象池
+			ctx := e.pool.Get().(*Context)
+			ctx.writer = w
+			ctx.request = req
+			ctx.params = ps
+			// 实体方法
+			handler(ctx)
+			//handler(w, req, ps)
+			// 设置
+			e.pool.Put(ctx)
+			return
 		}
 
-
-		//fmt.Printf("trees %v \n", e.trees)
-		//fmt.Printf("httpmethod %+V \n", req.Method)
-		//fmt.Printf("path %v \n", path)
-		//fmt.Printf("root %+v \n", root)
-		test(w)
-
+		// 都没有找到404操作
+		http.NotFound(w, req)
+		//http.Error(w, http.StatusText(404), 404)
 	}
-
 }
 
-// 处理router相关节点
-func (e *Engine) HandlerRouter(httpMethod, path string, handler HandlerRouter) {
+// 注册路由
+func (e *Engine) Router(httpMethod, path string, handler HandlerRouter) {
 	// 树为空 创建map 分配内存
 	if e.trees == nil {
 		e.trees = make(map[string]*node)
