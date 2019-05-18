@@ -1,7 +1,6 @@
 package koala
 
 import (
-	"fmt"
 	"net/http"
 	"sync"
 )
@@ -15,6 +14,9 @@ const (
 
 //type HandlerRouter func (http.ResponseWriter, *http.Request, Params)
 type HandlerRouter func (*Context)
+
+// 初始化路由结构体
+var IRooter Router
 
 // 声明 koala 引擎结构
 type Engine struct {
@@ -43,37 +45,31 @@ func (e *Engine) allocateContext() *Context {
 
 // 监听端口
 func (e *Engine) RUN(addr string) {
-	fmt.Printf("listen on %s \n", addr)
+	debugPrint("监听端口%s \n", addr)
+	debugPrintf("%s","[KOALA] 全部服务启动成功")
 	http.ListenAndServe(addr, e)
+}
+
+// 文件Server
+func (e *Engine) ServeFiles(path string, root http.FileSystem) {
+	IRooter.handlerServerFiles(path, root, e)
+	debugPrint("%s","静态文件服务器,启动完成")
 }
 
 // http中间件实现
 func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request ) {
-	// 获取路径
-	path := req.URL.Path
+	// 获取临时对象池
+	ctx := e.pool.Get().(*Context)
+	ctx.writer = w
+	ctx.request = req
+	ctx.engine = e
 
-	if root := e.trees[req.Method]; root != nil {
+	// 执行处理
+	IRooter.ctx = ctx
+	IRooter.handlerServeHTTP()
 
-		// 在树上找到对应请求方法，然后执行
-		if handler, ps, _ := root.getValue(path); handler != nil {
-
-			// 获取临时对象池
-			ctx := e.pool.Get().(*Context)
-			ctx.writer = w
-			ctx.request = req
-			ctx.params = ps
-			// 实体方法
-			handler(ctx)
-			//handler(w, req, ps)
-			// 设置
-			e.pool.Put(ctx)
-			return
-		}
-
-		// 都没有找到404操作
-		http.NotFound(w, req)
-		//http.Error(w, http.StatusText(404), 404)
-	}
+	// 重新写入临时对象池
+	e.pool.Put(ctx)
 }
 
 // 注册路由
@@ -94,6 +90,6 @@ func (e *Engine) Router(httpMethod, path string, handler HandlerRouter) {
 	root.addRoute(path, handler)
 }
 
-func test(w http.ResponseWriter) {
-	fmt.Fprint(w, "shuju")
+func init () {
+	debugPrintf("%s","[KOALA] 启动中")
 }
